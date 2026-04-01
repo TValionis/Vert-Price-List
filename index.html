@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vert Flooring – Supplier Price Intelligence</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://alcdn.msauth.net/browser/3.28.1/js/msal-browser.min.js"></script>
+<script src="https://unpkg.com/@azure/msal-browser@3.28.1/lib/msal-browser.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -515,7 +515,9 @@ async function initMsal(clientId, tenant) {
     ? `https://login.microsoftonline.com/${tenant.trim()}`
     : 'https://login.microsoftonline.com/common';
 
-  msalInstance = new msal.PublicClientApplication({
+  const msalLib = window.msalBrowser || window.msal;
+  if (!msalLib) throw new Error("MSAL library failed to load. Please refresh the page.");
+  msalInstance = new msalLib.PublicClientApplication({
     auth: { clientId, authority, redirectUri: REDIRECT_URI },
     cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
   });
