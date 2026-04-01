@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vert Flooring – Supplier Price Intelligence</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/3.28.1/js/msal-browser.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b0b0b;
+  --surface: #141414;
+  --surface2: #1c1c1c;
+  --surface3: #242424;
+  --border: #2c2c2c;
+  --accent: #b8f050;
+  --accent2: #50f0c8;
+  --text: #efefef;
+  --muted: #777;
+  --danger: #f05050;
+  --warn: #f0c850;
+  --best: rgba(184,240,80,0.08);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; font-size: 14px; }
+
+/* ── HEADER ── */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px; border-bottom: 1px solid var(--border);
+  background: var(--bg); position: sticky; top: 0; z-index: 100;
+}
+.logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; letter-spacing: -0.5px; }
+.logo span { color: var(--accent); }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.status-pill {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 20px; padding: 5px 13px;
+  font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.dot.live { background: var(--accent); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── SETUP SCREEN ── */
+#setupScreen {
+  max-width: 560px; margin: 80px auto; padding: 0 24px;
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px;
+}
+.setup-logo { font-family: 'Syne', sans-serif; font-size: 40px; font-weight: 800; }
+.setup-logo span { color: var(--accent); }
+.setup-sub { color: var(--muted); font-size: 14px; line-height: 1.7; max-width: 420px; }
+
+.setup-card {
+  width: 100%; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 24px; text-align: left;
+}
+.setup-card h3 { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; margin-bottom: 14px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+.setup-field { margin-bottom: 12px; }
+.setup-field label { display: block; font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px; }
+.setup-field input {
+  width: 100%; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 7px; padding: 9px 12px; color: var(--text);
+  font-family: 'DM Mono', monospace; font-size: 12px; outline: none; transition: border-color 0.2s;
+}
+.setup-field input:focus { border-color: var(--accent); }
+.setup-field input::placeholder { color: var(--muted); }
+.setup-help { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 6px; }
+.setup-help a { color: var(--accent2); }
+
+.btn-signin {
+  width: 100%; padding: 13px 24px; background: var(--accent); color: #0b0b0b;
+  border: none; border-radius: 9px; font-family: 'Syne', sans-serif;
+  font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.15s;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.btn-signin:hover { background: #caff58; transform: translateY(-1px); }
+.btn-signin:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.ms-logo { font-size: 18px; }
+
+.or-divider { display: flex; align-items: center; gap: 12px; width: 100%; color: var(--muted); font-size: 11px; }
+.or-divider::before, .or-divider::after { content:''; flex:1; height:1px; background:var(--border); }
+
+/* ── MAIN APP ── */
+#mainApp { display: none; flex-direction: column; height: calc(100vh - 57px); }
+.app-body { display: flex; flex: 1; overflow: hidden; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 320px; flex-shrink: 0; background: var(--surface);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.sidebar-section { padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.sidebar-label { font-family: 'DM Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin-bottom: 12px; }
+
+/* USER CARD */
+.user-card { display: flex; align-items: center; gap: 12px; }
+.user-avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 14px; color: #0b0b0b;
+  flex-shrink: 0;
+}
+.user-name { font-weight: 500; font-size: 13px; }
+.user-email { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.btn-signout {
+  margin-left: auto; background: transparent; border: 1px solid var(--border);
+  border-radius: 6px; color: var(--muted); font-size: 11px; padding: 4px 10px;
+  cursor: pointer; transition: all 0.15s; font-family: 'DM Mono', monospace;
+}
+.btn-signout:hover { border-color: var(--danger); color: var(--danger); }
+
+/* SCAN CONTROL */
+.btn-scan {
+  width: 100%; padding: 11px; background: var(--accent); color: #0b0b0b;
+  border: none; border-radius: 8px; font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.15s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.btn-scan:hover { background: #caff58; }
+.btn-scan:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.scan-options { display: flex; flex-direction: column; gap: 8px; }
+.scan-option-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.scan-option-row select, .scan-option-row input[type=number] {
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text); font-family: 'DM Mono', monospace; font-size: 11px;
+  padding: 4px 8px; outline: none;
+}
+.scan-option-row input[type=number] { width: 60px; }
+
+/* SCAN LOG */
+.scan-log {
+  background: var(--surface2); border-radius: 7px; padding: 10px 12px;
+  font-family: 'DM Mono', monospace; font-size: 10.5px; line-height: 1.8;
+  max-height: 160px; overflow-y: auto; color: var(--muted);
+}
+.log-entry { display: flex; gap: 6px; }
+.log-time { color: var(--accent); flex-shrink: 0; }
+.log-ok { color: var(--accent2); }
+.log-warn { color: var(--warn); }
+.log-err { color: var(--danger); }
+
+/* STATS */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.stat-val { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; color: var(--accent); line-height: 1; }
+.stat-lbl { font-size: 10px; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.8px; font-family: 'DM Mono', monospace; }
+
+/* SUPPLIER CHIPS */
+.chip-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 5px; padding: 3px 9px; font-size: 10.5px;
+  font-family: 'DM Mono', monospace; color: var(--muted);
+}
+.chip-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+/* LAST SCAN */
+.last-scan-info { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+/* ── MAIN PANEL ── */
+.main-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* SEARCH BAR */
+.search-bar {
+  padding: 16px 24px; border-bottom: 1px solid var(--border);
+  background: var(--surface); display: flex; gap: 10px; align-items: center;
+}
+.search-wrap { position: relative; flex: 1; }
+.search-wrap input {
+  width: 100%; background: var(--surface2); border: 1.5px solid var(--border);
+  border-radius: 9px; padding: 10px 16px 10px 40px; color: var(--text);
+  font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; transition: border-color 0.2s;
+}
+.search-wrap input:focus { border-color: var(--accent); }
+.search-wrap input::placeholder { color: var(--muted); }
+.search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; pointer-events: none; }
+
+/* FILTER TABS */
+.filter-bar {
+  padding: 10px 24px; border-bottom: 1px solid var(--border);
+  display: flex; gap: 6px; flex-wrap: wrap; background: var(--bg);
+}
+.ftab {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer;
+  transition: all 0.15s; color: var(--muted); font-family: 'DM Mono', monospace;
+  display: flex; align-items: center; gap: 5px;
+}
+.ftab:hover { border-color: var(--muted); color: var(--text); }
+.ftab.active { background: var(--accent); color: #0b0b0b; border-color: var(--accent); font-weight: 500; }
+.ftab-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+/* RESULTS */
+.results-area { flex: 1; overflow-y: auto; padding: 20px 24px; }
+.results-meta { font-family: 'DM Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 14px; }
+
+/* PRODUCT CARD */
+.pcard {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 11px; margin-bottom: 12px; overflow: hidden; transition: border-color 0.2s;
+}
+.pcard:hover { border-color: #3a3a3a; }
+.pcard-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; cursor: pointer; user-select: none;
+}
+.pcard-name { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; flex: 1; min-width: 0; }
+.pcard-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.best-badge {
+  display: flex; flex-direction: column; align-items: flex-end;
+  background: var(--best); border: 1px solid rgba(184,240,80,0.25);
+  border-radius: 7px; padding: 6px 12px; flex-shrink: 0;
+}
+.best-badge-label { font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; font-family: 'DM Mono', monospace; }
+.best-badge-price { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 800; color: var(--accent); line-height: 1.1; }
+.best-badge-sup { font-size: 10px; color: #888; font-family: 'DM Mono', monospace; }
+.save-tag {
+  font-size: 10px; background: rgba(184,240,80,0.1); color: var(--accent);
+  border-radius: 5px; padding: 4px 9px; font-family: 'DM Mono', monospace;
+  white-space: nowrap; flex-shrink: 0;
+}
+.toggle-chevron { color: var(--muted); font-size: 16px; transition: transform 0.2s; flex-shrink: 0; }
+.pcard.open .toggle-chevron { transform: rotate(180deg); }
+
+/* PRICE TABLE */
+.ptable-wrap { display: none; padding: 0 18px 16px; }
+.pcard.open .ptable-wrap { display: block; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { font-family: 'DM Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+td { padding: 9px 8px; border-bottom: 1px solid rgba(44,44,44,0.5); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+.best-row { background: var(--best); }
+.sup-cell { display: flex; align-items: center; gap: 7px; }
+.sup-col { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.price-mono { font-family: 'DM Mono', monospace; font-weight: 500; }
+.price-mono.best { color: var(--accent); }
+.price-mono.worst { color: var(--danger); }
+.bar-cell { display: flex; align-items: center; gap: 7px; }
+.pbar { height: 3px; border-radius: 2px; background: var(--accent); opacity: 0.6; min-width: 4px; }
+.saving-pill { font-size: 9px; background: rgba(184,240,80,0.1); color: var(--accent); border-radius: 4px; padding: 2px 6px; font-family: 'DM Mono', monospace; }
+.unit-cell, .date-cell { color: var(--muted); font-family: 'DM Mono', monospace; font-size: 11px; }
+.email-link { color: var(--accent2); font-size: 10px; text-decoration: none; font-family: 'DM Mono', monospace; }
+.email-link:hover { text-decoration: underline; }
+
+/* EMPTY */
+.empty { text-align: center; padding: 80px 40px; color: var(--muted); }
+.empty-icon { font-size: 44px; margin-bottom: 16px; opacity: 0.25; }
+.empty-title { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 700; color: #444; margin-bottom: 8px; }
+.empty-sub { font-size: 12px; line-height: 1.7; max-width: 360px; margin: 0 auto; }
+
+/* PROGRESS BAR */
+.progress-bar-wrap { background: var(--surface2); border-radius: 4px; overflow: hidden; height: 4px; margin-top: 10px; }
+.progress-bar { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.4s ease; width: 0%; }
+
+/* TOAST */
+.toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 9px; padding: 11px 16px; font-size: 12px; max-width: 320px;
+  z-index: 400; transform: translateY(16px); opacity: 0; transition: all 0.22s;
+  pointer-events: none;
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.ok { border-left: 3px solid var(--accent); }
+.toast.err { border-left: 3px solid var(--danger); }
+.toast.info { border-left: 3px solid var(--accent2); }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+mark { background: rgba(184,240,80,0.2); color: inherit; border-radius: 2px; }
+
+/* CONFIG NOTICE */
+.config-notice {
+  background: rgba(240,80,80,0.08); border: 1px solid rgba(240,80,80,0.25);
+  border-radius: 8px; padding: 12px 14px; font-size: 11.5px; color: #f08080; line-height: 1.7;
+  margin-bottom: 12px;
+}
+.config-notice strong { color: var(--danger); }
+.config-notice code { background: rgba(240,80,80,0.12); padding: 1px 5px; border-radius: 3px; font-family: 'DM Mono', monospace; font-size: 11px; }
+
+/* RESPONSIVE */
+@media (max-width: 680px) {
+  .sidebar { width: 100%; }
+  .app-body { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header>
+  <div class="logo">VERT<span>.</span>PRICE</div>
+  <div class="header-right">
+    <div class="status-pill" id="statusPill">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Not connected</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ SETUP SCREEN ═══════════════ -->
+<div id="setupScreen">
+  <div>
+    <div class="setup-logo">VERT<span>.</span>PRICE</div>
+    <p style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px;letter-spacing:1px;text-transform:uppercase">Supplier Price Intelligence</p>
+  </div>
+  <p class="setup-sub">Connect your Outlook account and this tool will automatically scan your emails and attachments for the latest supplier pricing — then let you search and compare instantly.</p>
+
+  <div id="configNoticeWrap"></div>
+
+  <div class="setup-card">
+    <h3>⚙️ Azure App Configuration</h3>
+    <div class="setup-field">
+      <label>Azure App Client ID</label>
+      <input type="text" id="clientIdInput" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+      <div class="setup-help">
+        <strong style="color:var(--text)">One-time setup at <a href="https://entra.microsoft.com" target="_blank" style="color:var(--accent2)">entra.microsoft.com</a>:</strong><br>
+        1. <b>Entra ID → App registrations → New registration</b><br>
+        2. Name it anything (e.g. <em>Vert Price Tool</em>)<br>
+        3. <b>Supported account types:</b><br>
+        &nbsp;&nbsp;• Work email (<code>@yourco.co.uk</code>) → <em>Single tenant</em><br>
+        &nbsp;&nbsp;• Personal Outlook/Hotmail → <em>Personal accounts only</em><br>
+        &nbsp;&nbsp;• Not sure → <em>Any Entra ID + personal accounts</em><br>
+        4. Leave redirect URI blank → <b>Register</b><br>
+        5. Go to <b>Authentication → Add a platform → Single-page application</b><br>
+        6. Set redirect URI to: <code id="redirectUriDisplay" style="word-break:break-all"></code><br>
+        7. <b>API permissions → Add → Microsoft Graph → Mail.Read</b><br>
+        8. Copy the <b>Application (client) ID</b> from Overview → paste below
+      </div>
+    </div>
+    <div class="setup-field">
+      <label>Tenant (match what you selected above)</label>
+      <input type="text" id="tenantInput" placeholder="common — or paste your tenant ID / domain" />
+      <div class="setup-help">
+        Single tenant → paste your <em>Directory (tenant) ID</em> from Overview.<br>
+        Personal / any accounts → leave as <code>common</code>.
+      </div>
+    </div>
+    <div style="margin-top:4px;margin-bottom:14px;font-size:11px;color:var(--muted);line-height:1.6">
+      Your Client ID is saved in your browser only — never sent anywhere except Microsoft's login.
+    </div>
+    <button class="btn-signin" id="signInBtn" onclick="signIn()">
+      <span class="ms-logo">🪟</span> Sign in with Microsoft & Connect Outlook
+    </button>
+  </div>
+
+  <div class="or-divider">or</div>
+
+  <button class="btn-signin" style="background:var(--surface2);color:var(--muted);border:1px solid var(--border);max-width:100%;width:100%;" onclick="loadDemo()">
+    ▶ Load demo data (no login needed)
+  </button>
+</div>
+
+<!-- ═══════════════ MAIN APP ═══════════════ -->
+<div id="mainApp">
+  <div class="app-body">
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+
+      <!-- User -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Account</div>
+        <div class="user-card">
+          <div class="user-avatar" id="userAvatar">?</div>
+          <div>
+            <div class="user-name" id="userName">–</div>
+            <div class="user-email" id="userEmail">–</div>
+          </div>
+          <button class="btn-signout" onclick="signOut()">Sign out</button>
+        </div>
+      </div>
+
+      <!-- Scan -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Scan Inbox</div>
+        <button class="btn-scan" id="scanBtn" onclick="startScan()">
+          <span>⚡</span> Scan for Pricing Emails
+        </button>
+        <div class="scan-options">
+          <div class="scan-option-row">
+            <span>Look back</span>
+            <select id="daysBack">
+              <option value="30">30 days</option>
+              <option value="60">60 days</option>
+              <option value="90" selected>90 days</option>
+              <option value="180">6 months</option>
+              <option value="365">1 year</option>
+              <option value="730">2 years</option>
+            </select>
+            <span>/ max</span>
+            <input type="number" id="maxEmails" value="60" min="5" max="200">
+            <span>emails</span>
+          </div>
+        </div>
+        <div class="progress-bar-wrap" id="progressWrap" style="display:none">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+      </div>
+
+      <!-- Scan Log -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Activity Log</div>
+        <div class="scan-log" id="scanLog">
+          <div class="log-entry"><span class="log-time">--:--</span><span>Ready — click Scan to start</span></div>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Database</div>
+        <div class="stats-grid">
+          <div class="stat-box"><div class="stat-val" id="sProducts">0</div><div class="stat-lbl">Products</div></div>
+          <div class="stat-box"><div class="stat-val" id="sSuppliers">0</div><div class="stat-lbl">Suppliers</div></div>
+          <div class="stat-box"><div class="stat-val" id="sPrices">0</div><div class="stat-lbl">Price Points</div></div>
+          <div class="stat-box"><div class="stat-val" id="sEmails">0</div><div class="stat-lbl">Emails Read</div></div>
+        </div>
+      </div>
+
+      <!-- Suppliers -->
+      <div class="sidebar-section" id="supplierSection" style="display:none">
+        <div class="sidebar-label">Suppliers Found</div>
+        <div class="chip-wrap" id="supplierChips"></div>
+      </div>
+
+      <!-- Last scan -->
+      <div class="sidebar-section">
+        <div class="last-scan-info" id="lastScanInfo">No scan yet</div>
+        <div style="margin-top:10px">
+          <button onclick="clearData()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;font-family:'DM Mono',monospace;width:100%">Clear All Pricing Data</button>
+        </div>
+      </div>
+
+    </div><!-- /sidebar -->
+
+    <!-- MAIN PANEL -->
+    <div class="main-panel">
+
+      <!-- Search -->
+      <div class="search-bar">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="Search product, material, supplier…" oninput="renderResults(this.value)">
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filter-bar" id="filterBar"></div>
+
+      <!-- Results -->
+      <div class="results-area">
+        <div class="results-meta" id="resultsMeta"></div>
+        <div id="resultsContainer">
+          <div class="empty">
+            <div class="empty-icon">📬</div>
+            <div class="empty-title">Ready to scan</div>
+            <div class="empty-sub">Click <strong style="color:var(--accent)">Scan for Pricing Emails</strong> to pull the latest prices from your Outlook inbox automatically.</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /main-panel -->
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+//  CONFIG & STATE
+// ══════════════════════════════════════════════
+const REDIRECT_URI = window.location.href.split('?')[0].split('#')[0];
+document.getElementById('redirectUriDisplay').textContent = REDIRECT_URI;
+
+const SCOPES = ['Mail.Read', 'User.Read'];
+const COLORS = ['#b8f050','#50f0c8','#f050b8','#f0c850','#50b8f0','#f07850','#c850f0','#50f078','#f05078','#78f050'];
+const PRICING_KEYWORDS = ['price', 'pricing', 'quote', 'quotation', 'pricelist', 'rate', 'cost', 'trade', 'invoice', 'proforma', 'per m2', 'per m²', '/m2', '/sqm', 'stock', 'catalogue', 'catalog'];
+const ATTACHMENT_EXTS = ['.csv', '.xlsx', '.xls', '.txt', '.pdf'];
+
+let msalInstance = null;
+let account = null;
+let allData = []; // { product, supplier, price, unit, currency, date, notes, emailSubject, emailId }
+let emailsScanned = 0;
+let activeFilter = null;
+let isScanning = false;
+
+// ── Load saved data
+try {
+  const saved = localStorage.getItem('vertPriceData');
+  if (saved) { allData = JSON.parse(saved); }
+  const savedCount = localStorage.getItem('vertEmailsScanned');
+  if (savedCount) emailsScanned = parseInt(savedCount);
+  const savedConfig = localStorage.getItem('vertClientId');
+  if (savedConfig) document.getElementById('clientIdInput').value = savedConfig;
+  const savedTenant = localStorage.getItem('vertTenant');
+  if (savedTenant) document.getElementById('tenantInput').value = savedTenant;
+} catch(e) {}
+
+// ══════════════════════════════════════════════
+//  AUTH
+// ══════════════════════════════════════════════
+async function initMsal(clientId, tenant) {
+  const authority = tenant && tenant.trim() && tenant.trim() !== 'common'
+    ? `https://login.microsoftonline.com/${tenant.trim()}`
+    : 'https://login.microsoftonline.com/common';
+
+  msalInstance = new msal.PublicClientApplication({
+    auth: { clientId, authority, redirectUri: REDIRECT_URI },
+    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
+  });
+  await msalInstance.initialize();
+  await msalInstance.handleRedirectPromise();
+}
+
+async function signIn() {
+  const clientId = document.getElementById('clientIdInput').value.trim();
+  const tenant = document.getElementById('tenantInput').value.trim() || 'common';
+  if (!clientId || clientId.length < 30) {
+    showNotice('Please enter a valid Azure App Client ID (36-character GUID).'); return;
+  }
+  localStorage.setItem('vertClientId', clientId);
+  localStorage.setItem('vertTenant', tenant);
+
+  document.getElementById('signInBtn').disabled = true;
+  document.getElementById('signInBtn').textContent = 'Redirecting to Microsoft…';
+
+  try {
+    await initMsal(clientId, tenant);
+    await msalInstance.loginRedirect({ scopes: SCOPES });
+  } catch(e) {
+    showNotice('Sign-in error: ' + e.message);
+    document.getElementById('signInBtn').disabled = false;
+    document.getElementById('signInBtn').innerHTML = '<span class="ms-logo">🪟</span> Sign in with Microsoft & Connect Outlook';
+  }
+}
+
+async function checkExistingSession() {
+  const clientId = localStorage.getItem('vertClientId');
+  const tenant = localStorage.getItem('vertTenant') || 'common';
+  if (!clientId) return;
+
+  try {
+    await initMsal(clientId, tenant);
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      account = accounts[0];
+      showMainApp();
+    }
+  } catch(e) { /* no session */ }
+}
+
+async function getToken() {
+  const req = { scopes: SCOPES, account };
+  try {
+    const res = await msalInstance.acquireTokenSilent(req);
+    return res.accessToken;
+  } catch(e) {
+    const res = await msalInstance.acquireTokenPopup(req);
+    return res.accessToken;
+  }
+}
+
+async function signOut() {
+  if (msalInstance && account) {
+    await msalInstance.logoutPopup({ account });
+  }
+  account = null;
+  document.getElementById('mainApp').style.display = 'none';
+  document.getElementById('setupScreen').style.display = 'flex';
+  setStatus(false, 'Not connected');
+}
+
+function showMainApp() {
+  document.getElementById('setupScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'flex';
+  setStatus(true, 'Connected');
+  document.getElementById('userName').textContent = account.name || account.username;
+  document.getElementById('userEmail').textContent = account.username;
+  document.getElementById('userAvatar').textContent = (account.name || account.username || '?')[0].toUpperCase();
+  updateStats();
+  renderResults('');
+  if (allData.length > 0) {
+    document.getElementById('lastScanInfo').textContent = `${allData.length} prices loaded from previous scan`;
+  }
+}
+
+// ══════════════════════════════════════════════
+//  SCAN
+// ══════════════════════════════════════════════
+async function startScan() {
+  if (isScanning) return;
+  isScanning = true;
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('scanBtn').innerHTML = '<span>⏳</span> Scanning…';
+  document.getElementById('progressWrap').style.display = 'block';
+  setProgress(0);
+  clearLog();
+
+  try {
+    const token = await getToken();
+    const days = parseInt(document.getElementById('daysBack').value);
+    const maxEmails = parseInt(document.getElementById('maxEmails').value);
+
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceStr = since.toISOString().split('T')[0];
+
+    log('Searching for supplier pricing emails…', 'ok');
+
+    // Search for pricing-related emails
+    const keywordFilter = PRICING_KEYWORDS.slice(0, 6).map(k => `"${k}"`).join(' OR ');
+    const searchUrl = `https://graph.microsoft.com/v1.0/me/messages?$filter=receivedDateTime ge ${sinceStr}&$select=id,subject,from,receivedDateTime,hasAttachments,body,bodyPreview&$top=${Math.min(maxEmails, 50)}&$orderby=receivedDateTime desc`;
+
+    setProgress(10);
+    log(`Fetching emails from last ${days} days…`, '');
+
+    const msgsRes = await graphGet(token, searchUrl);
+    let messages = msgsRes.value || [];
+
+    // Also get the next page if available
+    if (msgsRes['@odata.nextLink'] && messages.length < maxEmails) {
+      try {
+        const p2 = await graphGet(token, msgsRes['@odata.nextLink']);
+        messages = [...messages, ...(p2.value || [])];
+      } catch(e) {}
+    }
+
+    // Filter to likely pricing emails
+    const pricingEmails = messages.filter(m => {
+      const text = ((m.subject || '') + ' ' + (m.bodyPreview || '')).toLowerCase();
+      return PRICING_KEYWORDS.some(k => text.includes(k));
+    }).slice(0, maxEmails);
+
+    log(`Found ${messages.length} emails → ${pricingEmails.length} look price-related`, pricingEmails.length > 0 ? 'ok' : 'warn');
+    setProgress(20);
+
+    if (pricingEmails.length === 0) {
+      log('No pricing emails found. Try a longer date range.', 'warn');
+      toast('No pricing emails found in this period.', 'info');
+      done();
+      return;
+    }
+
+    let newPrices = [];
+    let processed = 0;
+
+    for (const msg of pricingEmails) {
+      const pct = 20 + Math.round((processed / pricingEmails.length) * 75);
+      setProgress(pct);
+      processed++;
+
+      const from = msg.from?.emailAddress?.address || 'Unknown';
+      const subject = msg.subject || '(no subject)';
+      const supplierGuess = guessSupplier(from, subject);
+
+      log(`[${processed}/${pricingEmails.length}] ${supplierGuess}: "${subject.substring(0,40)}…"`, '');
+
+      // Collect text to send to AI
+      let emailText = `FROM: ${from}\nSUBJECT: ${subject}\nDATE: ${msg.receivedDateTime}\n\n`;
+      emailText += msg.body?.content ? stripHtml(msg.body.content).substring(0, 3000) : (msg.bodyPreview || '');
+
+      // Check attachments
+      if (msg.hasAttachments) {
+        try {
+          const attachRes = await graphGet(token, `https://graph.microsoft.com/v1.0/me/messages/${msg.id}/attachments?$select=name,contentType,contentBytes,size`);
+          const attachments = attachRes.value || [];
+
+          for (const att of attachments) {
+            const ext = '.' + (att.name || '').split('.').pop().toLowerCase();
+            if (!ATTACHMENT_EXTS.includes(ext)) continue;
+            if (att.size > 5 * 1024 * 1024) { log(`  ↳ Skipping ${att.name} (too large)`, 'warn'); continue; }
+
+            log(`  ↳ Reading attachment: ${att.name}`, 'ok');
+
+            try {
+              let attText = '';
+              if (ext === '.csv' || ext === '.txt') {
+                const raw = atob(att.contentBytes);
+                attText = raw.substring(0, 4000);
+              } else if (ext === '.xlsx' || ext === '.xls') {
+                const raw = atob(att.contentBytes);
+                const bytes = new Uint8Array(raw.length);
+                for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                const wb = XLSX.read(bytes, { type: 'array' });
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                attText = XLSX.utils.sheet_to_csv(sheet).substring(0, 4000);
+              }
+              if (attText) emailText += `\n\n--- ATTACHMENT: ${att.name} ---\n${attText}`;
+            } catch(ae) { log(`  ↳ Could not read ${att.name}`, 'warn'); }
+          }
+        } catch(ae) { /* attachment fetch failed */ }
+      }
+
+      // Extract prices with AI
+      try {
+        const extracted = await extractWithAI(emailText, supplierGuess, subject, msg.id, msg.receivedDateTime);
+        if (extracted.length > 0) {
+          log(`  ↳ Extracted ${extracted.length} prices ✓`, 'ok');
+          newPrices = [...newPrices, ...extracted];
+        }
+      } catch(ae) { log(`  ↳ AI extraction failed`, 'warn'); }
+
+      emailsScanned++;
+    }
+
+    // Merge with existing, dedup, keep latest per product+supplier
+    if (newPrices.length > 0) {
+      mergeData(newPrices);
+      saveData();
+    }
+
+    setProgress(100);
+    const now = new Date().toLocaleString('en-GB');
+    document.getElementById('lastScanInfo').textContent = `Last scan: ${now} · ${processed} emails`;
+    log(`Done. ${newPrices.length} new prices found.`, newPrices.length > 0 ? 'ok' : 'warn');
+    toast(`✓ Scan complete — ${newPrices.length} prices extracted from ${processed} emails`, 'ok');
+    updateStats();
+    renderResults(document.getElementById('searchInput').value);
+
+  } catch(e) {
+    log('Error: ' + e.message, 'err');
+    toast('Scan error: ' + e.message, 'err');
+  }
+
+  done();
+}
+
+function done() {
+  isScanning = false;
+  document.getElementById('scanBtn').disabled = false;
+  document.getElementById('scanBtn').innerHTML = '<span>⚡</span> Scan for Pricing Emails';
+  setTimeout(() => document.getElementById('progressWrap').style.display = 'none', 2000);
+}
+
+// ── AI extraction
+async function extractWithAI(emailText, supplierGuess, subject, emailId, date) {
+  const prompt = `You are a pricing data extraction engine for Vert Flooring Ltd, a UK flooring contractor.
+
+Extract every product price from this supplier email / attachment text.
+
+For EACH price found return a JSON array item with:
+- "product": full product name (e.g. "Karndean Van Gogh Victorian Oak LVT")
+- "supplier": supplier company name (extracted from email, not guessed)
+- "price": numeric price only, no symbols
+- "unit": e.g. "m²", "per roll", "per box", "each", "per litre", "linear m"
+- "currency": "GBP" unless clearly different
+- "date": date string if mentioned, else null
+- "notes": any useful note (inc VAT, trade price, min order, etc.)
+
+Rules:
+- Only extract actual product prices, NOT delivery fees or VAT amounts
+- If supplier name unclear, use: "${supplierGuess}"
+- Normalise product names consistently
+- Return ONLY a valid JSON array. No markdown, no explanation. Empty array [] if no prices found.
+
+Email/Document:
+${emailText.substring(0, 6000)}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  const data = await res.json();
+  const raw = data.content?.find(b => b.type === 'text')?.text || '[]';
+  const clean = raw.replace(/```json|```/g, '').trim();
+  const parsed = JSON.parse(clean);
+  return parsed.filter(p => p.product && p.price > 0).map(p => ({
+    ...p,
+    price: parseFloat(p.price),
+    emailId,
+    emailSubject: subject,
+    date: p.date || date?.split('T')[0] || null
+  }));
+}
+
+// ── Graph helper
+async function graphGet(token, url) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// ══════════════════════════════════════════════
+//  DATA
+// ══════════════════════════════════════════════
+function mergeData(newPrices) {
+  // For each new price, if same product+supplier already exists, keep newest date
+  for (const np of newPrices) {
+    const existing = allData.findIndex(d =>
+      d.product.toLowerCase() === np.product.toLowerCase() &&
+      d.supplier.toLowerCase() === np.supplier.toLowerCase()
+    );
+    if (existing >= 0) {
+      // Replace if newer or same
+      allData[existing] = np;
+    } else {
+      allData.push(np);
+    }
+  }
+}
+
+function saveData() {
+  try {
+    localStorage.setItem('vertPriceData', JSON.stringify(allData));
+    localStorage.setItem('vertEmailsScanned', emailsScanned.toString());
+  } catch(e) {}
+}
+
+function clearData() {
+  if (!confirm('Clear all pricing data? This cannot be undone.')) return;
+  allData = [];
+  emailsScanned = 0;
+  saveData();
+  updateStats();
+  renderResults('');
+  document.getElementById('lastScanInfo').textContent = 'No scan yet';
+  toast('All pricing data cleared', 'info');
+}
+
+// ══════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════
+function renderResults(query) {
+  const q = query.toLowerCase().trim();
+  const container = document.getElementById('resultsContainer');
+  const metaEl = document.getElementById('resultsMeta');
+
+  if (allData.length === 0) {
+    container.innerHTML = `<div class="empty"><div class="empty-icon">📬</div><div class="empty-title">Ready to scan</div><div class="empty-sub">Click <strong style="color:var(--accent)">Scan for Pricing Emails</strong> to pull the latest prices from your Outlook inbox.</div></div>`;
+    metaEl.textContent = '';
+    return;
+  }
+
+  let filtered = allData.filter(p => {
+    const matchQ = !q || p.product.toLowerCase().includes(q) || p.supplier.toLowerCase().includes(q) || (p.notes||'').toLowerCase().includes(q);
+    const matchF = !activeFilter || p.supplier === activeFilter;
+    return matchQ && matchF;
+  });
+
+  // Group by product
+  const groups = {};
+  for (const e of filtered) {
+    if (!groups[e.product]) groups[e.product] = [];
+    groups[e.product].push(e);
+  }
+  const keys = Object.keys(groups).sort();
+
+  if (keys.length === 0) {
+    container.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">No results</div><div class="empty-sub">No products match "<strong>${q}</strong>"</div></div>`;
+    metaEl.textContent = '0 products';
+    return;
+  }
+
+  metaEl.textContent = `${keys.length} product${keys.length !== 1 ? 's' : ''} · ${filtered.length} price points`;
+  const cm = colorMap();
+
+  container.innerHTML = keys.map((product, idx) => {
+    const entries = groups[product].sort((a, b) => a.price - b.price);
+    const best = entries[0], worst = entries[entries.length - 1];
+    const hasMult = entries.length > 1;
+    const saving = hasMult ? `Save £${(worst.price - best.price).toFixed(2)}` : null;
+
+    const rows = entries.map((e, i) => {
+      const isBest = i === 0, isWorst = i === entries.length - 1 && hasMult;
+      const barW = Math.round((e.price / worst.price) * 100);
+      return `<tr class="${isBest ? 'best-row' : ''}">
+        <td><div class="sup-cell"><div class="sup-col" style="background:${cm[e.supplier]||'#888'}"></div>${e.supplier}</div></td>
+        <td><div class="bar-cell"><span class="price-mono ${isBest?'best':isWorst?'worst':''}">£${e.price.toFixed(2)}</span><div class="pbar" style="width:${barW}%"></div></div></td>
+        <td class="unit-cell">${e.unit||'m²'}</td>
+        <td>${isBest && hasMult ? '<span class="saving-pill">✓ BEST</span>' : isWorst ? '<span class="saving-pill" style="background:rgba(240,80,80,0.1);color:var(--danger)">▲ HIGH</span>' : ''}</td>
+        <td class="date-cell">${e.date||'—'}</td>
+        <td style="font-size:10px;color:var(--muted);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.notes||''}">${e.notes||''}</td>
+        <td>${e.emailSubject ? `<span title="${e.emailSubject}" style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">📧</span>` : ''}</td>
+      </tr>`;
+    }).join('');
+
+    return `<div class="pcard" id="pc${idx}">
+      <div class="pcard-head" onclick="toggleCard('pc${idx}')">
+        <div class="pcard-name"><div class="pcard-name-text">${hl(product, q)}</div></div>
+        <div class="best-badge">
+          <div class="best-badge-label">Best Price</div>
+          <div class="best-badge-price">£${best.price.toFixed(2)}<span style="font-size:10px;font-weight:400;color:#777"> /${best.unit||'m²'}</span></div>
+          <div class="best-badge-sup">${best.supplier}</div>
+        </div>
+        ${saving ? `<div class="save-tag">${saving}</div>` : ''}
+        <div class="toggle-chevron">▾</div>
+      </div>
+      <div class="ptable-wrap">
+        <table>
+          <thead><tr><th>Supplier</th><th>Price</th><th>Unit</th><th>Rank</th><th>Date</th><th>Notes</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (keys.length === 1) document.getElementById('pc0')?.classList.add('open');
+}
+
+function toggleCard(id) { document.getElementById(id)?.classList.toggle('open'); }
+
+function hl(text, q) {
+  if (!q) return text;
+  return text.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<mark>$1</mark>');
+}
+
+// ══════════════════════════════════════════════
+//  STATS & FILTERS
+// ══════════════════════════════════════════════
+function updateStats() {
+  document.getElementById('sProducts').textContent = new Set(allData.map(d=>d.product)).size;
+  document.getElementById('sSuppliers').textContent = new Set(allData.map(d=>d.supplier)).size;
+  document.getElementById('sPrices').textContent = allData.length;
+  document.getElementById('sEmails').textContent = emailsScanned;
+
+  const cm = colorMap();
+  const suppliers = [...new Set(allData.map(d=>d.supplier))].sort();
+
+  if (suppliers.length > 0) {
+    document.getElementById('supplierSection').style.display = 'block';
+    document.getElementById('supplierChips').innerHTML = suppliers.map(s =>
+      `<div class="chip"><div class="chip-dot" style="background:${cm[s]}"></div>${s}</div>`).join('');
+  } else {
+    document.getElementById('supplierSection').style.display = 'none';
+  }
+
+  // Filter tabs
+  const fb = document.getElementById('filterBar');
+  fb.innerHTML = `<div class="ftab ${!activeFilter?'active':''}" onclick="setFilter(null)">All</div>` +
+    suppliers.map(s => `<div class="ftab ${activeFilter===s?'active':''}" onclick="setFilter('${s.replace(/'/g,"\\'")}')"><span class="ftab-dot" style="background:${cm[s]}"></span>${s}</div>`).join('');
+}
+
+function setFilter(sup) {
+  activeFilter = sup;
+  updateStats();
+  renderResults(document.getElementById('searchInput').value);
+}
+
+function colorMap() {
+  const suppliers = [...new Set(allData.map(d=>d.supplier))].sort();
+  const m = {};
+  suppliers.forEach((s,i) => { m[s] = COLORS[i % COLORS.length]; });
+  return m;
+}
+
+// ══════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════
+function guessSupplier(email, subject) {
+  const domain = (email.split('@')[1]||'').replace(/\.(co\.uk|com|net|org)$/,'').replace(/\./g,' ');
+  return domain ? capitalise(domain) : 'Unknown Supplier';
+}
+
+function capitalise(s) {
+  return s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function stripHtml(html) {
+  return html.replace(/<[^>]*>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function setStatus(live, text) {
+  document.getElementById('statusDot').className = 'dot' + (live ? ' live' : '');
+  document.getElementById('statusText').textContent = text;
+}
+
+function setProgress(pct) {
+  document.getElementById('progressBar').style.width = pct + '%';
+}
+
+function log(msg, type) {
+  const el = document.getElementById('scanLog');
+  const now = new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const cls = type === 'ok' ? 'log-ok' : type === 'warn' ? 'log-warn' : type === 'err' ? 'log-err' : '';
+  el.innerHTML += `<div class="log-entry"><span class="log-time">${now}</span><span class="${cls}">${msg}</span></div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('scanLog').innerHTML = '';
+}
+
+function toast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+function showNotice(msg) {
+  document.getElementById('configNoticeWrap').innerHTML = `<div class="config-notice"><strong>Notice:</strong> ${msg}</div>`;
+}
+
+// ══════════════════════════════════════════════
+//  DEMO MODE
+// ══════════════════════════════════════════════
+function loadDemo() {
+  allData = [
+    { product:"Karndean Van Gogh Victorian Oak LVT", supplier:"Floor Supplies Direct", price:24.50, unit:"m²", date:"2025-01-15", notes:"Trade ex VAT", emailSubject:"Jan 2025 Price List" },
+    { product:"Karndean Van Gogh Victorian Oak LVT", supplier:"UK Flooring Direct", price:23.75, unit:"m²", date:"2025-03-02", notes:"Inc delivery", emailSubject:"Updated Pricing" },
+    { product:"Karndean Van Gogh Victorian Oak LVT", supplier:"Norcros Adhesives", price:26.10, unit:"m²", date:"2025-02-10", notes:"", emailSubject:"Trade Prices Feb 25" },
+    { product:"Amtico Signature Sable Oak", supplier:"Amtico Trade", price:31.00, unit:"m²", date:"2024-12-01", notes:"", emailSubject:"Trade Price Update" },
+    { product:"Amtico Signature Sable Oak", supplier:"Floor Supplies Direct", price:29.50, unit:"m²", date:"2025-01-15", notes:"Trade account", emailSubject:"Jan 2025 Price List" },
+    { product:"Polyflor Camaro Loc Pure Oak", supplier:"Polyflor Trade", price:18.50, unit:"m²", date:"2025-03-01", notes:"Direct trade", emailSubject:"March Price List" },
+    { product:"Polyflor Camaro Loc Pure Oak", supplier:"UK Flooring Direct", price:19.95, unit:"m²", date:"2025-03-05", notes:"", emailSubject:"Updated Pricing" },
+    { product:"Polyflor Camaro Loc Pure Oak", supplier:"Floor Supplies Direct", price:21.00, unit:"m²", date:"2025-02-01", notes:"", emailSubject:"Feb Price List" },
+    { product:"Uzin MK 200 Adhesive 15kg", supplier:"F Ball & Co", price:38.50, unit:"each", date:"2025-01-20", notes:"Trade price", emailSubject:"Adhesive Pricing" },
+    { product:"Uzin MK 200 Adhesive 15kg", supplier:"Norcros Adhesives", price:42.00, unit:"each", date:"2025-02-15", notes:"", emailSubject:"Trade Prices Feb 25" },
+    { product:"Uzin MK 200 Adhesive 15kg", supplier:"Floor Supplies Direct", price:40.00, unit:"each", date:"2025-03-01", notes:"", emailSubject:"March Price List" },
+    { product:"Foam Underlay 3mm", supplier:"Floor Supplies Direct", price:0.95, unit:"m²", date:"2025-02-01", notes:"Roll 15m²", emailSubject:"Feb Price List" },
+    { product:"Foam Underlay 3mm", supplier:"UK Flooring Direct", price:1.20, unit:"m²", date:"2025-01-10", notes:"", emailSubject:"Jan Trade Prices" },
+    { product:"Quickstep Impressive Ultra IMU1855", supplier:"UK Flooring Direct", price:33.20, unit:"m²", date:"2025-03-05", notes:"Trade account", emailSubject:"Updated Pricing" },
+    { product:"Quickstep Impressive Ultra IMU1855", supplier:"Floor Supplies Direct", price:34.99, unit:"m²", date:"2025-01-15", notes:"", emailSubject:"Jan 2025 Price List" },
+    { product:"Quickstep Impressive Ultra IMU1855", supplier:"Norcros Adhesives", price:36.50, unit:"m²", date:"2025-02-10", notes:"", emailSubject:"Trade Prices Feb 25" },
+    { product:"Sika SikaBond T52 6.5kg", supplier:"F Ball & Co", price:28.00, unit:"each", date:"2025-02-15", notes:"", emailSubject:"Adhesive Pricing" },
+    { product:"Sika SikaBond T52 6.5kg", supplier:"Norcros Adhesives", price:31.50, unit:"each", date:"2025-01-20", notes:"", emailSubject:"Trade Prices Jan 25" },
+    { product:"Altro Whiterock Ultima", supplier:"Altro Direct", price:48.00, unit:"m²", date:"2025-02-20", notes:"", emailSubject:"Feb Product Pricing" },
+    { product:"Altro Whiterock Ultima", supplier:"Norcros Adhesives", price:44.50, unit:"m²", date:"2025-01-15", notes:"2+ rolls", emailSubject:"Jan Trade Prices" },
+  ];
+  emailsScanned = 47;
+  saveData();
+
+  // Show app in demo mode
+  account = { name: 'Demo Mode', username: 'demo@vertflooring.co.uk' };
+  document.getElementById('setupScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'flex';
+  setStatus(false, 'Demo mode');
+  document.getElementById('userName').textContent = 'Demo Mode';
+  document.getElementById('userEmail').textContent = 'demo@vertflooring.co.uk';
+  document.getElementById('userAvatar').textContent = 'D';
+  document.getElementById('lastScanInfo').textContent = 'Demo data loaded — 47 emails simulated';
+  updateStats();
+  renderResults('');
+  toast('Demo data loaded — 20 prices across 5 suppliers', 'ok');
+}
+
+// ══════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════
+window.addEventListener('load', () => {
+  checkExistingSession();
+});
+</script>
+</body>
+</html>
