@@ -321,6 +321,18 @@ mark { background: rgba(184,240,80,0.2); color: inherit; border-radius: 2px; }
 
   <div id="configNoticeWrap"></div>
 
+  <div class="setup-card" style="margin-bottom:0">
+    <h3>🤖 Anthropic API Key</h3>
+    <div class="setup-field">
+      <label>Claude API Key</label>
+      <input type="password" id="anthropicKeyInput" placeholder="sk-ant-api03-…" autocomplete="off" />
+      <div class="setup-help">
+        Get your key at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a> → API Keys → Create Key.<br>
+        Used to extract pricing from emails using Claude AI. Saved in your browser only — never shared.
+      </div>
+    </div>
+  </div>
+
   <div class="setup-card">
     <h3>⚙️ Azure App Configuration</h3>
     <div class="setup-field">
@@ -505,6 +517,8 @@ try {
   if (savedConfig) document.getElementById('clientIdInput').value = savedConfig;
   const savedTenant = localStorage.getItem('vertTenant');
   if (savedTenant) document.getElementById('tenantInput').value = savedTenant;
+  const savedAnthropicKey = localStorage.getItem('vertAnthropicKey');
+  if (savedAnthropicKey) document.getElementById('anthropicKeyInput').value = savedAnthropicKey;
 } catch(e) {}
 
 // ══════════════════════════════════════════════
@@ -528,11 +542,16 @@ async function initMsal(clientId, tenant) {
 async function signIn() {
   const clientId = document.getElementById('clientIdInput').value.trim();
   const tenant = document.getElementById('tenantInput').value.trim() || 'common';
+  const anthropicKey = document.getElementById('anthropicKeyInput').value.trim();
+  if (!anthropicKey || !anthropicKey.startsWith('sk-ant-')) {
+    showNotice('Please enter a valid Anthropic API key (starts with <code>sk-ant-</code>). Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent2)">console.anthropic.com</a>.'); return;
+  }
   if (!clientId || clientId.length < 30) {
     showNotice('Please enter a valid Azure App Client ID (36-character GUID).'); return;
   }
   localStorage.setItem('vertClientId', clientId);
   localStorage.setItem('vertTenant', tenant);
+  localStorage.setItem('vertAnthropicKey', anthropicKey);
 
   document.getElementById('signInBtn').disabled = true;
   document.getElementById('signInBtn').textContent = 'Redirecting to Microsoft…';
@@ -822,11 +841,19 @@ Important rules:
 Email content:
 ${emailText.substring(0, 7000)}`;
 
+  const anthropicKey = localStorage.getItem('vertAnthropicKey') || '';
+  if (!anthropicKey) throw new Error('No Anthropic API key set. Please go back to the setup screen and enter your Claude API key.');
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': anthropicKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5',
       max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }]
     })
