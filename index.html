@@ -598,7 +598,7 @@ function showMainApp() {
 }
 
 // ══════════════════════════════════════════════
-//  SCAN
+//  SCAN  —  rebuilt for reliability
 // ══════════════════════════════════════════════
 async function startScan() {
   if (isScanning) return;
@@ -611,112 +611,154 @@ async function startScan() {
 
   try {
     const token = await getToken();
-    const days = parseInt(document.getElementById('daysBack').value);
+    const days  = parseInt(document.getElementById('daysBack').value);
     const maxEmails = parseInt(document.getElementById('maxEmails').value);
 
+    // ── Step 1: fetch recent emails (no keyword filter — let AI decide)
+    log('Connecting to your Outlook inbox…', 'ok');
     const since = new Date();
     since.setDate(since.getDate() - days);
-    const sinceStr = since.toISOString().split('T')[0];
+    const sinceISO = since.toISOString();
 
-    log('Searching for supplier pricing emails…', 'ok');
+    // Use $search for broader results, fall back to $filter if that fails
+    let messages = [];
+    try {
+      // Try search endpoint first — works better for work accounts
+      const searchPayload = {
+        requests: [{
+          entityTypes: ['message'],
+          query: { queryString: 'price OR pricing OR quote OR quotation OR pricelist OR "price list" OR "trade price" OR tariff OR rates' },
+          from: 0, size: Math.min(maxEmails, 25),
+          fields: ['id','subject','from','receivedDateTime','hasAttachments','bodyPreview']
+        }]
+      };
+      log('Searching inbox for pricing-related emails…', '');
+      const searchRes = await fetch('https://graph.microsoft.com/v1.0/search/query', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(searchPayload)
+      });
+      if (searchRes.ok) {
+        const sd = await searchRes.json();
+        const hits = sd?.value?.[0]?.hitsContainers?.[0]?.hits || [];
+        messages = hits.map(h => h.resource).filter(Boolean);
+        log(`Search found ${messages.length} pricing-related emails`, messages.length > 0 ? 'ok' : 'warn');
+      } else {
+        throw new Error('search api failed');
+      }
+    } catch(searchErr) {
+      // Fallback: just grab recent emails without keyword filter
+      log('Falling back to inbox scan (no keyword filter)…', 'warn');
+      const fallbackUrl = `https://graph.microsoft.com/v1.0/me/messages?$select=id,subject,from,receivedDateTime,hasAttachments,bodyPreview&$top=${Math.min(maxEmails, 50)}&$orderby=receivedDateTime desc`;
+      const fb = await graphGet(token, fallbackUrl);
+      messages = fb.value || [];
 
-    // Search for pricing-related emails
-    const keywordFilter = PRICING_KEYWORDS.slice(0, 6).map(k => `"${k}"`).join(' OR ');
-    const searchUrl = `https://graph.microsoft.com/v1.0/me/messages?$filter=receivedDateTime ge ${sinceStr}&$select=id,subject,from,receivedDateTime,hasAttachments,body,bodyPreview&$top=${Math.min(maxEmails, 50)}&$orderby=receivedDateTime desc`;
-
-    setProgress(10);
-    log(`Fetching emails from last ${days} days…`, '');
-
-    const msgsRes = await graphGet(token, searchUrl);
-    let messages = msgsRes.value || [];
-
-    // Also get the next page if available
-    if (msgsRes['@odata.nextLink'] && messages.length < maxEmails) {
-      try {
-        const p2 = await graphGet(token, msgsRes['@odata.nextLink']);
-        messages = [...messages, ...(p2.value || [])];
-      } catch(e) {}
+      // Paginate to get more if needed
+      let nextLink = fb['@odata.nextLink'];
+      while (nextLink && messages.length < maxEmails) {
+        try {
+          const p = await graphGet(token, nextLink);
+          messages = [...messages, ...(p.value || [])];
+          nextLink = p['@odata.nextLink'];
+        } catch(e) { break; }
+      }
+      messages = messages.slice(0, maxEmails);
+      log(`Fetched ${messages.length} recent emails to scan`, 'ok');
     }
 
-    // Filter to likely pricing emails
-    const pricingEmails = messages.filter(m => {
-      const text = ((m.subject || '') + ' ' + (m.bodyPreview || '')).toLowerCase();
-      return PRICING_KEYWORDS.some(k => text.includes(k));
-    }).slice(0, maxEmails);
+    setProgress(15);
 
-    log(`Found ${messages.length} emails → ${pricingEmails.length} look price-related`, pricingEmails.length > 0 ? 'ok' : 'warn');
-    setProgress(20);
-
-    if (pricingEmails.length === 0) {
-      log('No pricing emails found. Try a longer date range.', 'warn');
-      toast('No pricing emails found in this period.', 'info');
-      done();
-      return;
+    if (messages.length === 0) {
+      log('No emails found. Try increasing the date range.', 'warn');
+      toast('No emails found in this period. Try a wider date range.', 'info');
+      done(); return;
     }
 
+    // ── Step 2: for each email, fetch full body + attachments then run AI
     let newPrices = [];
     let processed = 0;
+    let priceEmailCount = 0;
 
-    for (const msg of pricingEmails) {
-      const pct = 20 + Math.round((processed / pricingEmails.length) * 75);
-      setProgress(pct);
+    for (const msg of messages) {
       processed++;
+      const pct = 15 + Math.round((processed / messages.length) * 80);
+      setProgress(pct);
 
-      const from = msg.from?.emailAddress?.address || 'Unknown';
+      const msgId = msg.id;
       const subject = msg.subject || '(no subject)';
+      const from = msg.from?.emailAddress?.address || msg.from?.emailAddress?.name || 'Unknown';
+      const receivedDate = msg.receivedDateTime || '';
       const supplierGuess = guessSupplier(from, subject);
 
-      log(`[${processed}/${pricingEmails.length}] ${supplierGuess}: "${subject.substring(0,40)}…"`, '');
+      log(`[${processed}/${messages.length}] "${subject.substring(0, 45)}${subject.length>45?'…':''}" ← ${supplierGuess}`, '');
 
-      // Collect text to send to AI
-      let emailText = `FROM: ${from}\nSUBJECT: ${subject}\nDATE: ${msg.receivedDateTime}\n\n`;
-      emailText += msg.body?.content ? stripHtml(msg.body.content).substring(0, 3000) : (msg.bodyPreview || '');
+      // Fetch full email body (not in search results)
+      let bodyText = msg.bodyPreview || '';
+      try {
+        const fullMsg = await graphGet(token, `https://graph.microsoft.com/v1.0/me/messages/${msgId}?$select=body,hasAttachments`);
+        if (fullMsg.body?.content) {
+          bodyText = stripHtml(fullMsg.body.content);
+        }
+        // update hasAttachments from full message
+        if (typeof fullMsg.hasAttachments === 'boolean') msg.hasAttachments = fullMsg.hasAttachments;
+      } catch(e) { /* use bodyPreview */ }
 
-      // Check attachments
+      let emailText = `FROM: ${from}\nSUBJECT: ${subject}\nDATE: ${receivedDate}\n\nEMAIL BODY:\n${bodyText.substring(0, 4000)}`;
+
+      // ── Attachments
       if (msg.hasAttachments) {
         try {
-          const attachRes = await graphGet(token, `https://graph.microsoft.com/v1.0/me/messages/${msg.id}/attachments?$select=name,contentType,contentBytes,size`);
-          const attachments = attachRes.value || [];
-
-          for (const att of attachments) {
-            const ext = '.' + (att.name || '').split('.').pop().toLowerCase();
+          const attachRes = await graphGet(token, `https://graph.microsoft.com/v1.0/me/messages/${msgId}/attachments?$select=name,contentType,contentBytes,size`);
+          const atts = attachRes.value || [];
+          for (const att of atts) {
+            if (!att.name) continue;
+            const ext = ('.' + att.name.split('.').pop()).toLowerCase();
             if (!ATTACHMENT_EXTS.includes(ext)) continue;
-            if (att.size > 5 * 1024 * 1024) { log(`  ↳ Skipping ${att.name} (too large)`, 'warn'); continue; }
+            const sizeMB = (att.size || 0) / (1024 * 1024);
+            if (sizeMB > 8) { log(`  ↳ Skipping ${att.name} (${sizeMB.toFixed(1)}MB — too large)`, 'warn'); continue; }
 
             log(`  ↳ Reading attachment: ${att.name}`, 'ok');
-
             try {
               let attText = '';
               if (ext === '.csv' || ext === '.txt') {
-                const raw = atob(att.contentBytes);
-                attText = raw.substring(0, 4000);
+                attText = decodeBase64(att.contentBytes).substring(0, 5000);
               } else if (ext === '.xlsx' || ext === '.xls') {
-                const raw = atob(att.contentBytes);
-                const bytes = new Uint8Array(raw.length);
-                for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                const bytes = base64ToUint8Array(att.contentBytes);
                 const wb = XLSX.read(bytes, { type: 'array' });
-                const sheet = wb.Sheets[wb.SheetNames[0]];
-                attText = XLSX.utils.sheet_to_csv(sheet).substring(0, 4000);
+                // Read ALL sheets
+                for (const sheetName of wb.SheetNames) {
+                  const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]);
+                  if (csv.trim().length > 10) attText += `\n[Sheet: ${sheetName}]\n${csv.substring(0, 3000)}`;
+                }
               }
-              if (attText) emailText += `\n\n--- ATTACHMENT: ${att.name} ---\n${attText}`;
-            } catch(ae) { log(`  ↳ Could not read ${att.name}`, 'warn'); }
+              if (attText.trim()) emailText += `\n\n--- ATTACHMENT: ${att.name} ---\n${attText}`;
+            } catch(ae) {
+              log(`  ↳ Could not parse ${att.name}: ${ae.message}`, 'warn');
+            }
           }
-        } catch(ae) { /* attachment fetch failed */ }
+        } catch(ae) {
+          log(`  ↳ Could not fetch attachments: ${ae.message}`, 'warn');
+        }
       }
 
-      // Extract prices with AI
+      // ── AI extraction
       try {
-        const extracted = await extractWithAI(emailText, supplierGuess, subject, msg.id, msg.receivedDateTime);
+        const extracted = await extractWithAI(emailText, supplierGuess, subject, msgId, receivedDate);
         if (extracted.length > 0) {
-          log(`  ↳ Extracted ${extracted.length} prices ✓`, 'ok');
+          log(`  ↳ ✓ Found ${extracted.length} prices`, 'ok');
           newPrices = [...newPrices, ...extracted];
+          priceEmailCount++;
+        } else {
+          log(`  ↳ No prices in this email`, '');
         }
-      } catch(ae) { log(`  ↳ AI extraction failed`, 'warn'); }
+      } catch(ae) {
+        log(`  ↳ AI error: ${ae.message}`, 'err');
+      }
 
       emailsScanned++;
     }
 
-    // Merge with existing, dedup, keep latest per product+supplier
+    // ── Save & render
     if (newPrices.length > 0) {
       mergeData(newPrices);
       saveData();
@@ -724,15 +766,22 @@ async function startScan() {
 
     setProgress(100);
     const now = new Date().toLocaleString('en-GB');
-    document.getElementById('lastScanInfo').textContent = `Last scan: ${now} · ${processed} emails`;
-    log(`Done. ${newPrices.length} new prices found.`, newPrices.length > 0 ? 'ok' : 'warn');
-    toast(`✓ Scan complete — ${newPrices.length} prices extracted from ${processed} emails`, 'ok');
+    document.getElementById('lastScanInfo').textContent = `Last scan: ${now}`;
+    log(`━━ Done: ${processed} emails scanned, ${priceEmailCount} had pricing, ${newPrices.length} prices extracted ━━`, newPrices.length > 0 ? 'ok' : 'warn');
+
+    if (newPrices.length === 0) {
+      toast(`Scanned ${processed} emails — no prices found. Check the log for details.`, 'info');
+    } else {
+      toast(`✓ ${newPrices.length} prices extracted from ${priceEmailCount} emails`, 'ok');
+    }
+
     updateStats();
     renderResults(document.getElementById('searchInput').value);
 
   } catch(e) {
-    log('Error: ' + e.message, 'err');
-    toast('Scan error: ' + e.message, 'err');
+    log(`Fatal error: ${e.message}`, 'err');
+    toast('Scan failed: ' + e.message, 'err');
+    console.error(e);
   }
 
   done();
@@ -742,60 +791,111 @@ function done() {
   isScanning = false;
   document.getElementById('scanBtn').disabled = false;
   document.getElementById('scanBtn').innerHTML = '<span>⚡</span> Scan for Pricing Emails';
-  setTimeout(() => document.getElementById('progressWrap').style.display = 'none', 2000);
+  setTimeout(() => { document.getElementById('progressWrap').style.display = 'none'; }, 3000);
 }
 
 // ── AI extraction
 async function extractWithAI(emailText, supplierGuess, subject, emailId, date) {
   const prompt = `You are a pricing data extraction engine for Vert Flooring Ltd, a UK flooring contractor.
 
-Extract every product price from this supplier email / attachment text.
+Your job: extract EVERY product price mentioned in this supplier email or attachment.
 
-For EACH price found return a JSON array item with:
-- "product": full product name (e.g. "Karndean Van Gogh Victorian Oak LVT")
-- "supplier": supplier company name (extracted from email, not guessed)
-- "price": numeric price only, no symbols
-- "unit": e.g. "m²", "per roll", "per box", "each", "per litre", "linear m"
-- "currency": "GBP" unless clearly different
-- "date": date string if mentioned, else null
-- "notes": any useful note (inc VAT, trade price, min order, etc.)
+Return a JSON array. Each item must have:
+- "product": specific product name (e.g. "Karndean Van Gogh Victorian Oak LVT 2.5mm")
+- "supplier": the supplier/company name sending this email
+- "price": number only, no £ sign (e.g. 24.50)
+- "unit": how price is measured (e.g. "m²", "per box", "each", "per roll", "per litre", "linear m")
+- "currency": "GBP"
+- "date": date if visible in the email, else null
+- "notes": anything useful like "ex VAT", "trade price", "min order 10m²", "per box covers 2.17m²"
 
-Rules:
-- Only extract actual product prices, NOT delivery fees or VAT amounts
-- If supplier name unclear, use: "${supplierGuess}"
-- Normalise product names consistently
-- Return ONLY a valid JSON array. No markdown, no explanation. Empty array [] if no prices found.
+Important rules:
+- Extract ALL prices you can find — be thorough
+- Include prices from attachments and tables
+- The supplier name is: "${supplierGuess}" if you cannot find it clearly stated
+- Numbers like £24.50/m², 24.50 per m2, £24.50 each — all count
+- Do NOT include delivery charges or VAT totals as separate products
+- If a price list has many products, include ALL of them
+- Return ONLY raw JSON array — no markdown fences, no explanation text
+- If truly no product prices exist, return []
 
-Email/Document:
-${emailText.substring(0, 6000)}`;
+Email content:
+${emailText.substring(0, 7000)}`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
+      max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }]
     })
   });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`API ${res.status}: ${errText.substring(0, 200)}`);
+  }
+
   const data = await res.json();
+
+  // Handle API-level errors
+  if (data.error) throw new Error(data.error.message || 'API error');
+
   const raw = data.content?.find(b => b.type === 'text')?.text || '[]';
-  const clean = raw.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(clean);
-  return parsed.filter(p => p.product && p.price > 0).map(p => ({
-    ...p,
-    price: parseFloat(p.price),
-    emailId,
-    emailSubject: subject,
-    date: p.date || date?.split('T')[0] || null
-  }));
+  const clean = raw.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/\s*```$/,'').trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(clean);
+  } catch(e) {
+    // Try to extract JSON array from response
+    const match = clean.match(/\[.*\]/s);
+    if (match) parsed = JSON.parse(match[0]);
+    else return [];
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .filter(p => p.product && p.price && parseFloat(p.price) > 0)
+    .map(p => ({
+      product: String(p.product).trim(),
+      supplier: String(p.supplier || supplierGuess).trim(),
+      price: parseFloat(p.price),
+      unit: String(p.unit || 'm²').trim(),
+      currency: 'GBP',
+      date: p.date || (date ? date.split('T')[0] : null),
+      notes: String(p.notes || '').trim(),
+      emailId,
+      emailSubject: subject
+    }));
 }
 
 // ── Graph helper
 async function graphGet(token, url) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Graph API ${res.status}: ${body.substring(0, 300)}`);
+  }
   return res.json();
+}
+
+// ── Base64 helpers
+function decodeBase64(b64) {
+  try {
+    return decodeURIComponent(escape(atob(b64)));
+  } catch(e) {
+    return atob(b64);
+  }
+}
+
+function base64ToUint8Array(b64) {
+  const raw = atob(b64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
 }
 
 // ══════════════════════════════════════════════
