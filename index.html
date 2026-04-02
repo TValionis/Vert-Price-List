@@ -646,7 +646,7 @@ async function startScan() {
       const searchPayload = {
         requests: [{
           entityTypes: ['message'],
-          query: { queryString: 'price OR pricing OR quote OR quotation OR pricelist OR "price list" OR "trade price" OR tariff OR rates' },
+          query: { queryString: '"price list" OR "pricelist" OR "trade prices" OR "trade price" OR "price update" OR "new prices" OR "buying terms" OR "rate card" OR "updated pricing" OR "price increase" OR "price change"' },
           from: 0, size: Math.min(maxEmails, 25),
           fields: ['id','subject','from','receivedDateTime','hasAttachments','bodyPreview']
         }]
@@ -661,6 +661,9 @@ async function startScan() {
         const sd = await searchRes.json();
         const hits = sd?.value?.[0]?.hitsContainers?.[0]?.hits || [];
         messages = hits.map(h => h.resource).filter(Boolean);
+        const ownDomain = account.username?.split('@')[1] || '';
+        if (ownDomain) messages = messages.filter(m => !(m.from?.emailAddress?.address||'').toLowerCase().includes(ownDomain));
+        messages.sort((a,b) => (b.hasAttachments?1:0)-(a.hasAttachments?1:0));
         log(`Search found ${messages.length} pricing-related emails`, messages.length > 0 ? 'ok' : 'warn');
       } else {
         throw new Error('search api failed');
@@ -762,8 +765,20 @@ async function startScan() {
 
       // ── AI extraction
       try {
-        const extracted = await extractWithAI(emailText, supplierGuess, subject, msgId, receivedDate);
-        if (extracted.length > 0) {
+        let extracted = [], attempts = 0;
+        while (attempts < 3) {
+          try {
+            extracted = await extractWithAI(emailText, supplierGuess, subject, msgId, receivedDate); break;
+          } catch(re) {
+            if (re.message?.includes('429') || re.message?.includes('rate_limit')) {
+              attempts++;
+              const wait = 60 * attempts;
+              log(`  Rate limited - waiting ${wait}s (retry ${attempts}/3)`, 'warn');
+              await new Promise(r => setTimeout(r, wait * 1000));
+            } else throw re;
+          }
+        }
+      }if (extracted.length > 0) {
           log(`  ↳ ✓ Found ${extracted.length} prices`, 'ok');
           newPrices = [...newPrices, ...extracted];
           priceEmailCount++;
@@ -775,6 +790,7 @@ async function startScan() {
       }
 
       emailsScanned++;
+      if (processed < messages.length) await new Promise(r => setTimeout(r, 13000));
     }
 
     // ── Save & render
